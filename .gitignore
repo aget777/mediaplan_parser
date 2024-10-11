@@ -1,0 +1,17 @@
+01_Архив/
+02_source_files/
+README.md
+__pycache__/
+config.ipynb
+config.py*
+get_mediaplan_data.ipynb
+google_connector.ipynb
+google_connector.py*
+mediaplan-parser-aaac8df334b7.json
+parse_functions.ipynb
+parse_functions.py*
+test_file.ipynb
+yandex_disk_func.ipynb
+yandex_disk_func.py*
+yandex_token.txt
+__pycache__/
