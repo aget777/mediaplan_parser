@@ -19,7 +19,10 @@ import re
 # In[ ]:
 
 
-
+base_cols = ['supplier', 'report_name', 'sheet_name', 'brand', 'period', 'source', 'site/ssp', 'placement', 
+                     'targeting', 'geo', 'soc_dem', 'ad copy format', 'rotation type', 
+                    'unit quantity', 'unit price', 'frequency', 'reach', 'impressions', 'clicks', 
+             'budget_without_nds', 'budget_nds', 'views', 'vtr, %']
 
 
 # In[ ]:
@@ -46,6 +49,7 @@ def get_beeline_mediaplan(data_link, network, report_name):
     df['Unnamed: 1'] = df['Unnamed: 1'].ffill()
     df['Unnamed: 2'] = df['Unnamed: 2'].ffill()
     df['Unnamed: 3'] = df['Unnamed: 3'].ffill()
+    df['Unnamed: 4'] = df['Unnamed: 4'].ffill()
     df = df.fillna('')
     # забираем индекс строки, где находится название Бренда
     brand_index = list(df[df['Unnamed: 1'].str.lower().str.contains('brand')].index)[0] 
@@ -64,56 +68,46 @@ def get_beeline_mediaplan(data_link, network, report_name):
     # обрезаем таблицу снизу
     df = df.iloc[:end_index].reset_index(drop=True)
     
-   # # # определяем к какрму типу рекламы относятся строки
-    if 'banners' in list(df['ad copy format'].drop_duplicates().apply(normalize_headers)) \
-    and len(list(df['ad copy format'].drop_duplicates().apply(normalize_headers)))<2:
-        # оставляем только нужные поля
-        df = df[['source', 'site/ssp', 'placement', 'targeting', 'ad copy format', 'unit', 'rotation type', 
-         'unit quantity', 'unit price', 'frequency', 'reach', 'impressions', 'clicks', 'ratecard price per period (rub, net)']]
+    standart_columns = ['source', 'site/ssp', 'placement', 'targeting', 'ad copy format', 'unit', 'rotation type', 
+         'unit quantity', 'unit price', 'frequency', 'reach', 'impressions', 'clicks', 'ratecard price per period (rub, net)']
+    
+    if 'views' in list(df.columns):
+        standart_columns += ['views', 'vtr, %']
     else:
-        df = df[['source', 'site/ssp', 'placement', 'targeting', 'ad copy format', 'unit', 'rotation type', 
-         'unit quantity', 'unit price', 'frequency', 'reach', 'impressions', 'clicks', 'views', 'vtr, %', 'ratecard price per period (rub, net)']]
-        # убираем знак -, если он есть
-        df['views'] = df['views'].apply(normalize_digits)
-        df['vtr, %'] = df['vtr, %'].apply(normalize_digits)
-        # нормализуем десятичные числа
-        df['views'] = df['views'].astype('int')
-        df['vtr, %'] = df['vtr, %'].astype('float')
-        
+        df = df[standart_columns]
+        df['views'] = 0
+        df['vtr, %'] = 0.0
+        standart_columns += ['views', 'vtr, %']
+
+    df = df[standart_columns]
+    df['views'] = df['views'].apply(normalize_digits)
+    df['vtr, %'] = df['vtr, %'].apply(normalize_digits)
+    df['views'] = df['views'].astype('int')
+    df['vtr, %'] = df['vtr, %'].astype('float')
+    
      # создаем список с названиями текстовых полей для их нормализации
     df = df.rename(columns={'ratecard price per period (rub, net)': 'budget_without_nds'})
     df['supplier'] = network
     df['report_name'] = report_name
+    df['sheet_name'] = 'Plan_Media'
     df['brand'] = brand
     df['period'] = period
-    text_columns = ['report_name', 'brand', 'period', 'source', 'site/ssp', 'placement', 'targeting', 'ad copy format', 'rotation type']
-    df[text_columns] = df[text_columns].apply(normalize_text)
+    df['geo'] = df['targeting'].apply(lambda x: get_targetings(x, 'beeline')[0])
+    df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'beeline')[1])
     
     # убираем знак рубля, если он есть в стоимости
     currecny_columns = ['unit', 'unit quantity']
     df[currecny_columns] = df[currecny_columns].apply(get_digits)
     
-    # нормализуем целые числа
-    int_columns = ['unit quantity', 'reach', 'impressions', 'clicks']
-    df[int_columns] = df[int_columns].apply(lambda x: x.astype('int'))
-    
-    # добавляем рассчитываемые показатели
-    # df['budget_without_nds'] = ((df['unit quantity'] / 1000) * df['unit price']).astype('float')
+    # # добавляем рассчитываемые показатели
+    # # df['budget_without_nds'] = ((df['unit quantity'] / 1000) * df['unit price']).astype('float')
     df['budget_without_nds'] = df['budget_without_nds'].astype('float')
     df['budget_nds'] =(df['budget_without_nds'] * 1.2).astype('float').round(2)
-
-    base_cols = ['supplier', 'report_name', 'brand', 'period', 'source', 'site/ssp', 'placement', 'targeting', 'ad copy format', 'rotation type',\
-                    'unit quantity', 'unit price', 'frequency', 'reach', 'impressions', 'clicks', 'budget_without_nds', 'budget_nds']
     
-    media_cols = ['views', 'vtr, %']
-    if 'views' not in list(df.columns):
-        df['views'] = 0
-        df['vtr, %'] = 0.0
-        base_cols += media_cols
-    else:
-        base_cols += media_cols
+    df['vtr, %'] = df['vtr, %'].apply(replace_blank)
+    df['views'] = df['views'].apply(replace_blank)
+    
     df = df[base_cols]
-    
     return df
 
 
@@ -134,9 +128,10 @@ def get_firstdata_mediaplan(data_link, network, report_name):
     sheet_names = pd.ExcelFile(BytesIO(data_link))
     for sheet_name in sheet_names.sheet_names:
         if 'mediaplan' in sheet_name:
-            print(sheet_name)
             df = pd.read_excel(BytesIO(data_link), sheet_name=sheet_name)
             # заполняем вниз название истоника
+            sheet_name = normalize_headers(sheet_name)
+            print(sheet_name)
             df['Unnamed: 1'] = df['Unnamed: 1'].ffill()
             # заполняем вниз таргетинги
             df['Unnamed: 2'] = df['Unnamed: 2'].ffill()
@@ -162,23 +157,27 @@ def get_firstdata_mediaplan(data_link, network, report_name):
             # обрезаем таблицу снизу
             df = df.iloc[:end_index].reset_index(drop=True)
             # создаем базовый список полей, которые есть всегда вне зависимости от типа размещения
-            base_columns = ['category', 'targeting by purchase', 'format', 'quantity of units', 'period', 
+            standart_columns = ['category', 'targeting by purchase', 'format', 'quantity of units', 'period', 
                             'price list cost (cost per unit) net ', 'rotation type',
                             'total price list cost net', 'reach forecast (uu)', 'frequency total till',
                             'impressions', 'clicks']
             # проверяем наличие Видео размещений. Если они есть, то используем дополнительные поля из таблицы
             # создаем список уникальных форматов и преобразуем его в одну строку
-            format_string = ''.join(list(df['format'].drop_duplicates().apply(lambda x: normalize_headers(x))))
-            if 'видео' in format_string:
-                base_columns += ['number of views', 'vtr,%']
+            
+            if 'vtr,%' in list(df.columns):
+               standart_columns += ['number of views', 'vtr,%']
+            else:
+                df = df[standart_columns]
+                df['number of views'] = 0
+                df['vtr,%'] = 0.0
+                standart_columns += ['number of views', 'vtr,%']
                 
-            df = df[base_columns]
+            df = df[standart_columns]
             df = df.rename(columns={'category': 'source', 'targeting by purchase': 'targeting', 'format': 'ad copy format', 
                                     'quantity of units': 'unit quantity', 'price list cost (cost per unit) net ': 'unit price', 
                                     'frequency total till': 'frequency', 'reach forecast (uu)': 'reach', 
-                                    'total price list cost net' :'budget_without_nds'})
-            if 'видео' in format_string:
-                df = df.rename(columns={'number of views': 'views', 'vtr,%': 'vtr, %'})
+                                    'total price list cost net' :'budget_without_nds', 'number of views': 'views', 'vtr,%': 'vtr, %'})
+    
             # некоторые типы размещений имеют объединенные строки
             # например Баннер и универсальный баннер - это 2 строки с объединенными ячейками по расходам, показам и тд.
             # поэтому создадим доп. поле, где соединим их названия в одну строку
@@ -209,62 +208,27 @@ def get_firstdata_mediaplan(data_link, network, report_name):
             # передаем новое название формата в нужное нам поле
             df['ad copy format'] = df['merge_type_cells']
             df = df.drop('merge_type_cells', axis=1)
-    
+        
             df['supplier'] = network
-            df['report_name'] = sheet_name
+            df['report_name'] = report_name
+            df['sheet_name'] = sheet_name
             df['brand'] = brand
             df['period'] = period
             df['site/ssp'] = ''
             df['placement'] = ''
             df['budget_nds'] =(df['budget_without_nds'] * 1.2).astype('float').round(2)
-            # нормализуем текстовые поля
-            text_columns = ['report_name', 'brand', 'period', 'source', 'site/ssp', 'placement', 'targeting', 'ad copy format', 'rotation type']
-            df[text_columns] = df[text_columns].apply(normalize_text)
-            # нормализуем целые числа
-            int_columns = ['unit quantity', 'reach', 'impressions', 'clicks']
-            df[int_columns] = df[int_columns].apply(lambda x: x.astype('int'))
-            # к десятичным приводим только некоторые колонки, т.к. в остальных может встречаться пусто - оно не конвертируется в число
-            # не хочется тратить на это время
-            df['budget_without_nds'] = df['budget_without_nds'].astype('float')
-            base_cols = ['supplier', 'report_name', 'brand', 'period', 'source', 'site/ssp', 'placement', 'targeting', 'ad copy format', 'rotation type',\
-                                'unit quantity', 'unit price', 'frequency', 'reach', 'impressions', 'clicks', 'budget_without_nds', 'budget_nds']
+            # вызываем функцию для парсинга текста из поля targeting
+            # значение каждого таргетинга записываем в отдельное поле датаФрейма
+            df['geo'] = df['targeting'].apply(lambda x: get_targetings(x, 'firstdata')[0])
+            df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'firstdata')[1])
             
-            media_cols = ['views', 'vtr, %']
-            if 'views' not in list(df.columns):
-                df['views'] = 0
-                df['vtr, %'] = 0.0
-                base_cols += media_cols
-            else:
-                base_cols += media_cols
-    
+            df['vtr, %'] = df['vtr, %'].apply(replace_blank)
+            df['views'] = df['views'].apply(replace_blank)
+            
             df = df[base_cols]
             tmp_dict[sheet_name] = df
 
     return pd.concat(tmp_dict, ignore_index=True)
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
 
 
 # In[ ]:
@@ -389,4 +353,58 @@ def get_digits(column):
     except:
         res = column
     return res
+
+
+# In[ ]:
+
+
+# создаем функцию для парсинга таргетингов из текста
+# на вход она принимает ключевое слово - start_pattern -какой именно таргетинг мы ищем гео: / ца: / интересы:
+# окончанием строки - end_pattern - передаем слово или символ, который будет считаться окончанием строки например -  \n или слово покупатели
+# если таргетинг находится в конце текста, то возвращаем текст до конца
+# на выходе функция текст таргетинга БЕЗ ключевого слова
+def get_target_text(start_pattern, end_pattern, text):
+    start_index = text.index(start_pattern)
+    text = text[start_index:]
+    end_index = text.index(end_pattern)
+    target_text = text[len(start_pattern):end_index]
+
+    target_text = target_text.strip().replace('\n', ' ')
+
+    return target_text
+
+
+# In[ ]:
+
+
+# создаем функцию для записи названий таргетингов в поля датаФрейма
+# на входе она принимает 2 параметра
+# column - поле с текстом, который нужно распарсить
+# source - название источника (какому поставщику принадлежит таблица - таким образом мы понимаем, какие правила парсинга применяются
+# для каждого таргетинга отдельно вызываем функцию, чтобы достать нужный текст
+# на выходе возвращаем список с текстом для каждого таргетинга
+# если таргеитнга не было в тексте, то вернутся пустые строки
+def get_targetings(column, source):
+    geo = ''
+    soc_dem = ''
+    text = column.lower().strip()
+    if 'гео:' in text or 'ца:' in text:
+        if source == 'firstdata':
+            geo = get_target_text('гео:', '\n', text)
+            soc_dem = get_target_text('ца:', 'покупатели', text)
+        if source == 'beeline':
+            geo = get_target_text('гео:', '\n', text)
+            soc_dem = get_target_text('ца:', '\n', text)
+
+    return [geo, soc_dem]
+
+
+# In[ ]:
+
+
+def replace_blank(column):
+    value = str(column) 
+    if value=='':
+        value = '0.0'
+    return value
 
