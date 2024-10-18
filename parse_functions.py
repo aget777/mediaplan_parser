@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[ ]:
+# In[1]:
 
 
 import pandas as pd
@@ -21,7 +21,7 @@ import re
 
 base_cols = ['supplier', 'report_name', 'sheet_name', 'brand', 'period', 'source', 'site/ssp', 'placement', 
                      'targeting', 'geo', 'soc_dem', 'ad copy format', 'rotation type', 
-                    'unit quantity', 'unit price', 'frequency', 'reach', 'impressions', 'clicks', 
+                     'unit price', 'frequency', 'reach', 'impressions', 'clicks', 
              'budget_without_nds', 'budget_nds', 'views', 'vtr, %']
 
 
@@ -67,46 +67,50 @@ def get_beeline_mediaplan(data_link, network, report_name):
     end_index = list(df[df['source'].str.lower().str.contains('итого')].index)[0]
     # обрезаем таблицу снизу
     df = df.iloc[:end_index].reset_index(drop=True)
-    
+    # создаем базовый список полей, которые есть всегда вне зависимости от типа размещения
     standart_columns = ['source', 'site/ssp', 'placement', 'targeting', 'ad copy format', 'unit', 'rotation type', 
-         'unit quantity', 'unit price', 'frequency', 'reach', 'impressions', 'clicks', 'ratecard price per period (rub, net)']
+          'unit price', 'frequency', 'reach', 'impressions', 'clicks', 'ratecard price per period (rub, net)']
     
-    if 'views' in list(df.columns):
-        standart_columns += ['views', 'vtr, %']
-    else:
-        df = df[standart_columns]
+    # проверяем наличие Видео размещений. Если они есть, то используем дополнительные поля из таблицы
+    # если Видео размещений нет, то добавляем дополнительно 2 поля с 0 (это нужно для нормализации общей таблицы
+    if 'views' not in list(df.columns):
         df['views'] = 0
         df['vtr, %'] = 0.0
-        standart_columns += ['views', 'vtr, %']
-
+        
+    standart_columns += ['views', 'vtr, %']
+    # оставляем только нужные поля
     df = df[standart_columns]
     df['views'] = df['views'].apply(normalize_digits)
     df['vtr, %'] = df['vtr, %'].apply(normalize_digits)
     df['views'] = df['views'].astype('int')
     df['vtr, %'] = df['vtr, %'].astype('float')
     
-     # создаем список с названиями текстовых полей для их нормализации
+     # переименовываем поля
     df = df.rename(columns={'ratecard price per period (rub, net)': 'budget_without_nds'})
+    # добавляем поля с общей информацией
     df['supplier'] = network
     df['report_name'] = report_name
     df['sheet_name'] = 'Plan_Media'
     df['brand'] = brand
     df['period'] = period
+    # вызываем функцию для парсинга текста из поля targeting
+    # значение каждого таргетинга записываем в отдельное поле датаФрейма
     df['geo'] = df['targeting'].apply(lambda x: get_targetings(x, 'beeline')[0])
     df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'beeline')[1])
     
     # убираем знак рубля, если он есть в стоимости
-    currecny_columns = ['unit', 'unit quantity']
+    currecny_columns = ['unit']
     df[currecny_columns] = df[currecny_columns].apply(get_digits)
     
     # # добавляем рассчитываемые показатели
     # # df['budget_without_nds'] = ((df['unit quantity'] / 1000) * df['unit price']).astype('float')
     df['budget_without_nds'] = df['budget_without_nds'].astype('float')
     df['budget_nds'] =(df['budget_without_nds'] * 1.2).astype('float').round(2)
-    
+    # если в этих полях встречаются пустые ячейки, то заменяем их на 0
     df['vtr, %'] = df['vtr, %'].apply(replace_blank)
     df['views'] = df['views'].apply(replace_blank)
     
+    # переставляем поля местами, чтобы все было единообразно
     df = df[base_cols]
     return df
 
@@ -122,6 +126,8 @@ def get_beeline_mediaplan(data_link, network, report_name):
 # 3. В столбике B  находится слово Period справа от него В столбике C название указан период медиаплана
 # 4. В столбике B  должно находиться поле Source
 # 5. Каждая таблица должна заканчиваться строкой итогов 
+# 6. В столбике С находятся Таргетинги - Targeting by purchase 
+# 7. В столбике I находится тип размещения (CPC, CPM)
 
 def get_firstdata_mediaplan(data_link, network, report_name):
     tmp_dict = {}
@@ -129,9 +135,10 @@ def get_firstdata_mediaplan(data_link, network, report_name):
     for sheet_name in sheet_names.sheet_names:
         if 'mediaplan' in sheet_name:
             df = pd.read_excel(BytesIO(data_link), sheet_name=sheet_name)
-            # заполняем вниз название истоника
+            # приводим в порядок название листа, чтобы его записать в новую таблицу
             sheet_name = normalize_headers(sheet_name)
             print(sheet_name)
+            # заполняем вниз название истоника
             df['Unnamed: 1'] = df['Unnamed: 1'].ffill()
             # заполняем вниз таргетинги
             df['Unnamed: 2'] = df['Unnamed: 2'].ffill()
@@ -157,24 +164,22 @@ def get_firstdata_mediaplan(data_link, network, report_name):
             # обрезаем таблицу снизу
             df = df.iloc[:end_index].reset_index(drop=True)
             # создаем базовый список полей, которые есть всегда вне зависимости от типа размещения
-            standart_columns = ['category', 'targeting by purchase', 'format', 'quantity of units', 'period', 
+            standart_columns = ['category', 'targeting by purchase', 'format', 'period', 
                             'price list cost (cost per unit) net ', 'rotation type',
                             'total price list cost net', 'reach forecast (uu)', 'frequency total till',
                             'impressions', 'clicks']
             # проверяем наличие Видео размещений. Если они есть, то используем дополнительные поля из таблицы
-            # создаем список уникальных форматов и преобразуем его в одну строку
-            
-            if 'vtr,%' in list(df.columns):
-               standart_columns += ['number of views', 'vtr,%']
-            else:
-                df = df[standart_columns]
+            # если Видео размещений нет, то добавляем дополнительно 2 поля с 0 (это нужно для нормализации общей таблицы     
+            if 'vtr,%' not in list(df.columns):
                 df['number of views'] = 0
                 df['vtr,%'] = 0.0
-                standart_columns += ['number of views', 'vtr,%']
                 
+            standart_columns += ['number of views', 'vtr,%']
+            # оставляем только нужные поля
             df = df[standart_columns]
+            # приводим названия полей к единому стандарту
             df = df.rename(columns={'category': 'source', 'targeting by purchase': 'targeting', 'format': 'ad copy format', 
-                                    'quantity of units': 'unit quantity', 'price list cost (cost per unit) net ': 'unit price', 
+                                     'price list cost (cost per unit) net ': 'unit price', 
                                     'frequency total till': 'frequency', 'reach forecast (uu)': 'reach', 
                                     'total price list cost net' :'budget_without_nds', 'number of views': 'views', 'vtr,%': 'vtr, %'})
     
@@ -201,14 +206,17 @@ def get_firstdata_mediaplan(data_link, network, report_name):
                     base_name = df['ad copy format'][i]
                 df['merge_type_cells'][i] =  base_name
     
-            # забираем окончание таблицы
-            end_index = list(df[df['unit quantity']==''].index)[0]
-            # обрезаем таблицу снизу
-            df = df.iloc[:end_index].reset_index(drop=True)
+            # последняя строка является объединенной Сначала идет строка Баннеры - в ней все цифры
+            # Второая строка Универсальные баннеры - в ней нет значений потому что поставщик считает, что это одно и тоже
+            # мы убираем такие строки без данных
+            df = df[df['impressions']!='']
+            # end_index = list(df[df['unit price']==''].index)[0]
+            # # обрезаем таблицу снизу
+            # df = df.iloc[:end_index].reset_index(drop=True)
             # передаем новое название формата в нужное нам поле
             df['ad copy format'] = df['merge_type_cells']
             df = df.drop('merge_type_cells', axis=1)
-        
+            # добавляем поля с общей информацией
             df['supplier'] = network
             df['report_name'] = report_name
             df['sheet_name'] = sheet_name
@@ -221,10 +229,10 @@ def get_firstdata_mediaplan(data_link, network, report_name):
             # значение каждого таргетинга записываем в отдельное поле датаФрейма
             df['geo'] = df['targeting'].apply(lambda x: get_targetings(x, 'firstdata')[0])
             df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'firstdata')[1])
-            
+            # если в этих полях встречаются пустые ячейки, то заменяем их на 0
             df['vtr, %'] = df['vtr, %'].apply(replace_blank)
             df['views'] = df['views'].apply(replace_blank)
-            
+            # переставляем поля местами, чтобы все было единообразно
             df = df[base_cols]
             tmp_dict[sheet_name] = df
 
@@ -234,7 +242,96 @@ def get_firstdata_mediaplan(data_link, network, report_name):
 # In[ ]:
 
 
+# источник Hybrid
+# типы размещения Видео и Баннерная реклама
+# Функция для обработки медиаплана 
+# 1. Медиаплан для обработки находится на листе Plan_Media 
+# 2. В столбике B  находится слово Brand справа от него В столбике C название Бренда
+# 3. В столбике B  находится слово Period справа от него В столбике C название указан период медиаплана
+# 4. В столбике B  должно находиться поле Source
+# 5. Каждая таблица должна заканчиваться строкой итогов 
+# 6. В столбике С находятся Таргетинги - Targeting by purchase 
+# 7. В столбике I находится тип размещения (CPC, CPM)
 
+def get_hybrid_mediaplan(data_link, network, report_name):
+    tmp_dict = {}
+    sheet_names = pd.ExcelFile(BytesIO(data_link))
+    for sheet_name in sheet_names.sheet_names:
+       if 'медиаплан' in sheet_name.lower():
+            df = pd.read_excel(BytesIO(data_link), sheet_name=sheet_name, header=None)
+            sheet_name = normalize_headers(sheet_name)
+            print(sheet_name)
+            # В столбике В находится строка итогов, по слову Итого мы определяем окончание таблицы с данными
+            # но в некоторых случаях перед строкой итогов есть пустая строка
+            # далее мы создадим проверку для поиска нужного нам окончания таблицы
+            # сейчас пока что заполним пустые ячейки в этой таблице нулями
+            df[1] = df[1].fillna('0')
+            df = df.fillna('')
+            # забираем индекс строки, где находится название Бренда
+            brand_index = list(df[df[1].str.lower().str.contains('рекламодатель')].index)[0] 
+            # сохраняем название бренда
+            brand = df[3].loc[brand_index] 
+            # забираем период медиаплана
+            period = df[3].loc[brand_index+2] 
+            # забираем индекс начала таблицы
+            start_index = list(df[df[1].str.lower().str.contains('тип')].index)[0]
+            # задаем названия полей
+            df.columns = df.iloc[start_index].apply(normalize_headers) # забираем название полей из файла
+            # обрезаем верхнюю часть таблицы. она больше не нужна
+            df = df.iloc[start_index+1:].reset_index(drop=True)
+            # забираем окончание таблицы
+            # создаем правило для проверки окончания таблицы 
+            # если слово Итого имеет индекс строки больше, чем пустая строка, которую мы заполнили 0, то берем первый индекс ячейки с 0
+            # иначе берем индекс строки с Итого
+            total_index =list(df[df['тип трафика'].str.lower().str.contains('итого')].index)[0]
+            check_index = list(df[df['тип трафика'].str.lower().str.contains('0')].index)[0]
+            if total_index > check_index:
+                end_index = check_index
+            else:
+                end_index = total_index
+            # обрезаем таблицу снизу
+            df = df.iloc[:end_index].reset_index(drop=True)
+            # создаем базовый список полей, которые есть всегда вне зависимости от типа размещения
+            standart_columns = ['тип трафика', 'формат', 'продукт', 'гео', 'единица', 
+                                'цена за единицу, rub (без ндс)',
+                                'стоимость, rub (без ндс)', 'показы', 
+                                'охват', 'частота показа на пользователя']
+            # проверяем наличие Видео размещений. Если они есть, то используем дополнительные поля из таблицы
+            # создаем список уникальных форматов и преобразуем его в одну строку
+            if 'vtr, %' not in list(df.columns):
+                df['количество досмотров'] = 0
+                df['vtr, %'] = 0.0
+            if 'ssp' not in list(df.columns):
+                df['ssp'] = ''
+            if 'клики' not in list(df.columns):
+                df['клики'] = 0
+            standart_columns += ['количество досмотров', 'vtr, %', 'ssp', 'клики']
+            # оставляем только нужныеинам поля
+            df = df[standart_columns]
+            # приводим названия полей к единому стандарту
+            df = df.rename(columns={'тип трафика': 'placement', 'формат': 'ad copy format', 'продукт': 'targeting', 
+                                    'гео': 'geo', 'ssp': 'site/ssp', 
+                                    'единица': 'rotation type', 'цена за единицу, rub (без ндс)': 'unit price', 
+                            'стоимость, rub (без ндс)': 'budget_without_nds',
+                            'показы': 'impressions', 'клики': 'clicks', 'охват': 'reach',
+                           'частота показа на пользователя': 'frequency', 'количество досмотров': 'views'})
+    
+            df['supplier'] = network
+            df['source'] = network
+            df['report_name'] = report_name
+            df['sheet_name'] = sheet_name
+            df['brand'] = brand
+            df['period'] = period
+            df['budget_nds'] =(df['budget_without_nds'] * 1.2).astype('float').round(2)
+            # вызываем функцию для парсинга текста из поля targeting
+            # значение каждого таргетинга записываем в отдельное поле датаФрейма
+            df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'hybrid')[1])
+            df['views'] = df['views'].apply(normalize_digits)
+            df['vtr, %'] = df['vtr, %'].apply(normalize_digits)
+            df = df[base_cols]
+            tmp_dict[sheet_name] = df
+
+    return pd.concat(tmp_dict, ignore_index=True)
 
 
 # In[ ]:
@@ -255,12 +352,16 @@ def parse_yandex_responce(report_name, data_link, main_folder, file_path, yandex
     if 'firstdata' in report_name:
         network = 'firstdata'
         main_dict[report_name] = get_firstdata_mediaplan(data_link, network, report_name)
+        
+    if 'hybrid' in report_name:
+        network = 'hybrid'
+        main_dict[report_name] = get_hybrid_mediaplan(data_link, network, report_name)
 
     # в самом конце удаляем файл по этому источнику
     delete_yandex_disk_file(main_folder, file_path, yandex_token)
 
 
-# In[1]:
+# In[ ]:
 
 
 # создаем функцию, которая забирает Excel файлы из указанной папки
@@ -329,7 +430,7 @@ def normalize_text(column):
     return column.str.lower().str.strip().str.replace('\n', ' ')
 
 
-# In[2]:
+# In[ ]:
 
 
 # создаем функцию, которая заменяет - на 0, если тире присутствует в ячейке
@@ -395,16 +496,25 @@ def get_targetings(column, source):
         if source == 'beeline':
             geo = get_target_text('гео:', '\n', text)
             soc_dem = get_target_text('ца:', '\n', text)
-
+        if source=='hybrid':
+            soc_dem = get_target_text('ца:', '\n', text)
     return [geo, soc_dem]
 
 
 # In[ ]:
 
 
+# создаем функцию, которая проверяет - если ячейка пустая, то записываем 0
+# иначе ничего не меняем
 def replace_blank(column):
     value = str(column) 
     if value=='':
         value = '0.0'
     return value
+
+
+# In[ ]:
+
+
+
 
