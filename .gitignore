@@ -1,6 +1,8 @@
 01_Архив/
 README.md
 __pycache__/
+config.ipynb
+config.py*
 mediaplan-parser-aaac8df334b7.json
 yandex_token.txt
 __pycache__/
