@@ -337,6 +337,85 @@ def get_hybrid_mediaplan(data_link, network, report_name):
 # In[ ]:
 
 
+# источник Mobidriven
+# типы размещения Видео и Баннерная реклама
+# Функция для обработки медиаплана 
+# 1. Медиаплан для обработки находится на листе Plan_Media 
+# 2. В столбике B  находится слово Brand справа от него В столбике C название Бренда
+# 3. В столбике B  находится слово Period справа от него В столбике C название указан период медиаплана
+# 4. В столбике B  должно находиться поле Source
+# 5. Каждая таблица должна заканчиваться строкой итогов 
+# 6. В столбике С находятся Таргетинги - Targeting by purchase 
+# 7. В столбике I находится тип размещения (CPC, CPM)
+
+def get_mobidriven_mediaplan(data_link, network, report_name):
+    tmp_dict = {}
+    sheet_names = pd.ExcelFile(BytesIO(data_link))
+    for sheet_name in sheet_names.sheet_names:
+        if 'мп' in sheet_name.lower():
+            df = pd.read_excel(BytesIO(data_link), sheet_name=sheet_name, header=None)
+            sheet_name = normalize_headers(sheet_name)
+            print(sheet_name)
+            df[0] = df[0].fillna('0')
+            df = df.fillna('')
+            # сохраняем название бренда
+            brand = df[1].loc[get_index_row(df, 0, 'клиент')]
+            # сохраняем период
+            period = df[1].loc[get_index_row(df, 0, 'период')]
+            # сохраняем ЦА
+            soc_dem = df[1].loc[get_index_row(df, 0, 'ца')]
+            # забираем индекс начала таблицы
+            start_index = get_index_row(df, 0, 'категория')
+            # задаем названия полей
+            df.columns = df.iloc[start_index].apply(normalize_headers) # забираем название полей из файла
+            # обрезаем верхнюю часть таблицы. она больше не нужна
+            df = df.iloc[start_index+2:].reset_index(drop=True)
+            # обрезаем таблицу снизу
+            end_index = get_index_row(df, 'категория / инструмент', '0')
+            df = df.iloc[:end_index]
+            df['формат'] = df.apply(get_timing, axis=1)
+
+            # создаем базовый список полей, которые есть всегда вне зависимости от типа размещения
+            standart_columns = ['категория / инструмент', 'таргетинги / сегменты', 'тип трафика', 'формат', 'гео', 'единица закупки', 
+                            'цена за единицу', 'стоимость, руб, без учета ндс, 20%',
+                            'показы', 'частота', 'охват', 'клики']
+            # проверяем наличие Видео размещений. Если они есть, то используем дополнительные поля из таблицы
+            # если Видео размещений нет, то добавляем дополнительно 2 поля с 0 (это нужно для нормализации общей таблицы
+            if 'vtr %' not in list(df.columns):
+                df['досмотры'] = 0
+                df['vtr %'] = 0.0
+        
+            standart_columns += ['досмотры', 'vtr %']
+            # оставляем только нужные поля
+            df = df[standart_columns]
+                
+            # приводим названия полей к единому стандарту
+            df = df.rename(columns={'категория / инструмент': 'source', 'тип трафика': 'placement', 'таргетинги / сегменты': 'targeting',
+                                'формат': 'ad copy format', 'гео': 'geo', 'единица закупки': 'rotation type',
+                       'цена за единицу': 'unit price', 'стоимость, руб, без учета ндс, 20%': 'budget_without_nds',
+                       'показы': 'impressions', 'частота': 'frequency', 'охват': 'reach', 'клики': 'clicks', 'досмотры': 'views', 'vtr %': 'vtr, %'})
+            df['supplier'] = network
+            df['report_name'] = report_name
+            df['sheet_name'] = sheet_name
+            df['brand'] = brand
+            df['period'] = period
+            df['site/ssp'] = ''
+            df['budget_nds'] =(df['budget_without_nds'] * 1.2).astype('float').round(2)
+            # вызываем функцию для парсинга текста из поля targeting
+            # значение каждого таргетинга записываем в отдельное поле датаФрейма
+            df['soc_dem'] = soc_dem
+            # если в этих полях встречаются пустые ячейки, то заменяем их на 0
+            df['vtr, %'] = df['vtr, %'].apply(replace_blank)
+            df['views'] = df['views'].apply(replace_blank)
+            df = df[base_cols]
+            tmp_dict[sheet_name] = df
+
+    return pd.concat(tmp_dict, ignore_index=True)
+
+
+# In[ ]:
+
+
 # создаем функцию для обработки данных в эксель файле
 # в зависимости от источника парсинг будет отличаться
 # на входе функция принимает
@@ -357,6 +436,9 @@ def parse_yandex_responce(report_name, data_link, main_folder, file_path, yandex
         network = 'hybrid'
         main_dict[report_name] = get_hybrid_mediaplan(data_link, network, report_name)
 
+    if 'mobidriven' in report_name:
+        network = 'mobidriven'
+        main_dict[report_name] = get_mobidriven_mediaplan(data_link, network, report_name)
     # в самом конце удаляем файл по этому источнику
     delete_yandex_disk_file(main_folder, file_path, yandex_token)
 
@@ -516,5 +598,19 @@ def replace_blank(column):
 # In[ ]:
 
 
+# создаем функцию, чтобы получить индекс строки с первым встречанием заданного паттерна
+def get_index_row(df, col_name, flag):
+    return list(df[df[col_name].str.lower().str.contains(flag)].index)[0] 
 
+
+# In[ ]:
+
+
+# создаем функцию, чтобы забрать хронометраж ролика, если он встречается в ячейке
+def get_timing(row):
+    result = str(row['формат'])
+    timing = str(row['хронометраж ролика'])
+    if len(timing) > 0:
+        result += f' timing: {timing}'
+    return result
 
