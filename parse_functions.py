@@ -15,6 +15,17 @@ from datetime import datetime, date, timedelta
 from yandex_disk_func import *
 import re
 
+import config
+
+# забираем Яндекс токен
+yandex_token = config.yandex_token
+# # указываем путь к основной папке, в которой храняться папки с флайтами
+main_folder = config.main_folder
+
+# забираем токен для подключения к гугл
+service_key = config.service
+gmail = config.gmail
+
 
 # In[ ]:
 
@@ -38,8 +49,8 @@ base_cols = ['supplier', 'report_name', 'sheet_name', 'brand', 'period', 'source
 # типы размещения Видео и Баннерная реклама
 # Функция для обработки медиаплана 
 # 1. Медиаплан для обработки находится на листе Plan_Media 
-# 2. В столбике B  находится слово Brand справа от него В столбике C название Бренда
-# 3. В столбике B  находится слово Period справа от него В столбике C название указан период медиаплана
+# 2. В столбике B  находится слово Brand справа от него в столбике C название Бренда
+# 3. В столбике B  находится слово Period справа от него в столбике C название указан период медиаплана
 # 4. В столбике B  должно находиться поле Source
 # 5. Каждая таблица должна заканчиваться строкой итогов 
 
@@ -51,20 +62,21 @@ def get_beeline_mediaplan(data_link, network, report_name):
     df['Unnamed: 3'] = df['Unnamed: 3'].ffill()
     df['Unnamed: 4'] = df['Unnamed: 4'].ffill()
     df = df.fillna('')
-    # забираем индекс строки, где находится название Бренда
-    brand_index = list(df[df['Unnamed: 1'].str.lower().str.contains('brand')].index)[0] 
+
     # сохраняем название бренда
-    brand = df['Unnamed: 2'].loc[brand_index] 
-    # забираем период медиаплана
-    period = df['Unnamed: 2'].loc[brand_index+1] 
+    brand = df['Unnamed: 2'].loc[get_index_row(df, 'Unnamed: 1', 'brand')] 
+    # сохраняем период
+    period = df['Unnamed: 2'].loc[get_index_row(df, 'Unnamed: 1', 'period')]
     # забираем индекс начала таблицы
-    start_index = list(df[df['Unnamed: 1'].str.lower().str.contains('source')].index)[0]
+    start_index = get_index_row(df, 'Unnamed: 1', 'source')
+
+    
     # задаем названия полей
     df.columns = df.iloc[start_index].apply(normalize_headers) # забираем название полей из файла
     # обрезаем верхнюю часть таблицы. она больше не нужна
     df = df.iloc[start_index+2:].reset_index(drop=True)
     # забираем окончание таблицы
-    end_index = list(df[df['source'].str.lower().str.contains('итого')].index)[0]
+    end_index = get_index_row(df, 'source', 'итого')
     # обрезаем таблицу снизу
     df = df.iloc[:end_index].reset_index(drop=True)
     # создаем базовый список полей, которые есть всегда вне зависимости от типа размещения
@@ -122,8 +134,8 @@ def get_beeline_mediaplan(data_link, network, report_name):
 # типы размещения Видео и Баннерная реклама
 # Функция для обработки медиаплана 
 # 1. Медиаплан для обработки находится на листе Plan_Media 
-# 2. В столбике B  находится слово Brand справа от него В столбике C название Бренда
-# 3. В столбике B  находится слово Period справа от него В столбике C название указан период медиаплана
+# 2. В столбике B  находится слово Brand справа от него в столбике C название Бренда
+# 3. В столбике B  находится слово Period справа от него в столбике C название указан период медиаплана
 # 4. В столбике B  должно находиться поле Source
 # 5. Каждая таблица должна заканчиваться строкой итогов 
 # 6. В столбике С находятся Таргетинги - Targeting by purchase 
@@ -147,20 +159,20 @@ def get_firstdata_mediaplan(data_link, network, report_name):
             df['Unnamed: 8'] = df['Unnamed: 8'].fillna('rotation type')
             # заполняем вниз объединенные ячейки
             df = df.fillna('')
-            # забираем индекс строки, где находится название Бренда
-            brand_index = list(df[df['Unnamed: 2'].str.lower().str.contains('brand')].index)[0] 
+            
             # сохраняем название бренда
-            brand = df['Unnamed: 3'].loc[brand_index] 
-            # забираем период медиаплана
-            period = df['Unnamed: 3'].loc[brand_index+2] 
+            brand = df['Unnamed: 3'].loc[get_index_row(df, 'Unnamed: 2', 'brand')] 
+            # сохраняем период
+            period = df['Unnamed: 3'].loc[get_index_row(df, 'Unnamed: 2', 'период')]
             # забираем индекс начала таблицы
-            start_index = list(df[df['Unnamed: 1'].str.lower().str.contains('category')].index)[0]
+            start_index = get_index_row(df, 'Unnamed: 1', 'category')
+            
             # задаем названия полей
             df.columns = df.iloc[start_index].apply(normalize_headers) # забираем название полей из файла
             # обрезаем верхнюю часть таблицы. она больше не нужна
             df = df.iloc[start_index+2:].reset_index(drop=True)
             # забираем окончание таблицы
-            end_index =list(df[df['category'].str.lower().str.contains('total')].index)[0]
+            end_index = get_index_row(df, 'category', 'total')
             # обрезаем таблицу снизу
             df = df.iloc[:end_index].reset_index(drop=True)
             # создаем базовый список полей, которые есть всегда вне зависимости от типа размещения
@@ -246,8 +258,8 @@ def get_firstdata_mediaplan(data_link, network, report_name):
 # типы размещения Видео и Баннерная реклама
 # Функция для обработки медиаплана 
 # 1. Медиаплан для обработки находится на листе Plan_Media 
-# 2. В столбике B  находится слово Brand справа от него В столбике C название Бренда
-# 3. В столбике B  находится слово Period справа от него В столбике C название указан период медиаплана
+# 2. В столбике B  находится слово Brand справа от него в столбике C название Бренда
+# 3. В столбике B  находится слово Period справа от него в столбике C название указан период медиаплана
 # 4. В столбике B  должно находиться поле Source
 # 5. Каждая таблица должна заканчиваться строкой итогов 
 # 6. В столбике С находятся Таргетинги - Targeting by purchase 
@@ -267,14 +279,14 @@ def get_hybrid_mediaplan(data_link, network, report_name):
             # сейчас пока что заполним пустые ячейки в этой таблице нулями
             df[1] = df[1].fillna('0')
             df = df.fillna('')
-            # забираем индекс строки, где находится название Бренда
-            brand_index = list(df[df[1].str.lower().str.contains('рекламодатель')].index)[0] 
+           
             # сохраняем название бренда
-            brand = df[3].loc[brand_index] 
-            # забираем период медиаплана
-            period = df[3].loc[brand_index+2] 
-            # забираем индекс начала таблицы
-            start_index = list(df[df[1].str.lower().str.contains('тип')].index)[0]
+            brand = df[3].loc[get_index_row(df, 1, 'рекламодатель')] 
+            # сохраняем период
+            period = df[3].loc[get_index_row(df, 1, 'период')]
+           # забираем индекс начала таблицы
+            start_index = get_index_row(df, 1, 'тип')
+
             # задаем названия полей
             df.columns = df.iloc[start_index].apply(normalize_headers) # забираем название полей из файла
             # обрезаем верхнюю часть таблицы. она больше не нужна
@@ -283,8 +295,8 @@ def get_hybrid_mediaplan(data_link, network, report_name):
             # создаем правило для проверки окончания таблицы 
             # если слово Итого имеет индекс строки больше, чем пустая строка, которую мы заполнили 0, то берем первый индекс ячейки с 0
             # иначе берем индекс строки с Итого
-            total_index =list(df[df['тип трафика'].str.lower().str.contains('итого')].index)[0]
-            check_index = list(df[df['тип трафика'].str.lower().str.contains('0')].index)[0]
+            total_index = get_index_row(df, 'тип трафика', 'итого') 
+            check_index = get_index_row(df, 'тип трафика', '0')
             if total_index > check_index:
                 end_index = check_index
             else:
@@ -340,13 +352,10 @@ def get_hybrid_mediaplan(data_link, network, report_name):
 # источник Mobidriven
 # типы размещения Видео и Баннерная реклама
 # Функция для обработки медиаплана 
-# 1. Медиаплан для обработки находится на листе Plan_Media 
-# 2. В столбике B  находится слово Brand справа от него В столбике C название Бренда
-# 3. В столбике B  находится слово Period справа от него В столбике C название указан период медиаплана
-# 4. В столбике B  должно находиться поле Source
-# 5. Каждая таблица должна заканчиваться строкой итогов 
-# 6. В столбике С находятся Таргетинги - Targeting by purchase 
-# 7. В столбике I находится тип размещения (CPC, CPM)
+# 1. Название листа, на котром находится Медиаплан должно содержать буквы МП 
+# 2. В столбике А  находится слово Бренд справа от него в столбике В название Бренда
+# 3. В столбике А  находится слово Период справа от него в столбике В название указан период медиаплана
+
 
 def get_mobidriven_mediaplan(data_link, network, report_name):
     tmp_dict = {}
@@ -422,7 +431,7 @@ def get_mobidriven_mediaplan(data_link, network, report_name):
 # -название отчета - по сути это название источника
 # - ссылку для скачивания эксель файла
 # - путь к файлу, чтобы его удалить после закачивания
-def parse_yandex_responce(report_name, data_link, main_folder, file_path, yandex_token, main_dict):
+def parse_yandex_responce(report_name, data_link, file_path, main_dict):
     
     if 'beeline' in report_name:
         network = 'beeline'
@@ -440,7 +449,7 @@ def parse_yandex_responce(report_name, data_link, main_folder, file_path, yandex
         network = 'mobidriven'
         main_dict[report_name] = get_mobidriven_mediaplan(data_link, network, report_name)
     # в самом конце удаляем файл по этому источнику
-    delete_yandex_disk_file(main_folder, file_path, yandex_token)
+    delete_yandex_disk_file(file_path)
 
 
 # In[ ]:
@@ -454,7 +463,7 @@ def parse_yandex_responce(report_name, data_link, main_folder, file_path, yandex
 # flag - это ключевое слово, которое содержится в названии папки, чтобы можно было понять к кому она отностится
 # именно эту папку мы и будем прасить
 # так же принимаем на входе 2 словаря - Баннеры и Видео (в них сохраним все данные)
-def get_data_from_ya_folder(main_folder, yandex_folders, yandex_token, main_dict, flag='prog'):
+def get_data_from_ya_folder(yandex_folders, main_dict, flag='prog'):
     public_key = yandex_folders['public_key']  # из ответа Яндекс забираем public_key, чтобы использовать его для скачивания файлов
 
     for i in range(len(yandex_folders['_embedded']['items'])): # через цикл проходим по ответу Яндекса и забираем названия вложенных папок
@@ -484,7 +493,7 @@ def get_data_from_ya_folder(main_folder, yandex_folders, yandex_token, main_dict
                             download_response = requests.get(res_file_link['href'])
 
                             # return download_response, report_name
-                            parse_yandex_responce(report_name, download_response.content, main_folder, file_path, yandex_token, main_dict)
+                            parse_yandex_responce(report_name, download_response.content, file_path, main_dict)
                                                   
 
 

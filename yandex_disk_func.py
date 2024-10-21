@@ -14,6 +14,12 @@ import os
 import json
 import yadisk
 import warnings
+import config
+
+# забираем Яндекс токен
+yandex_token = config.yandex_token
+# # указываем путь к основной папке, в которой храняться папки с флайтами
+main_folder = config.main_folder
 
 
 # УРЛ для операций над опубликованными папками и файлами на Яндекс Диске
@@ -62,7 +68,7 @@ def get_yandex_disk_responce(request_url, public_key, folder_path, limit=80):
 # соответсвенно он НЕ будет удален из папки
 # и по итогу мы увидим, какие новые НЕ согласованные файлы остались НЕ загруженными
 
-def delete_yandex_disk_file(main_folder, file_path, yandex_token):
+def delete_yandex_disk_file(file_path):
     # final_delete_url = '' # создаем пустую строковую переменную для формирования пути удаления файлов
     url_path = urlencode(dict(path=main_folder+file_path)) # кодируем полный путь к файлу вместе с его названием
     
