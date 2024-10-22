@@ -6,17 +6,33 @@
 
 import pandas as pd
 import numpy as np
-import os
-import requests
 from io import BytesIO
+import requests
+from urllib.parse import urlencode
+import urllib
+from requests.auth import HTTPBasicAuth
+from requests.exceptions import ChunkedEncodingError
+import os
 import json
 import yadisk
 from datetime import datetime, date, timedelta
-from yandex_disk_func import *
-import re
+import locale
+from time import sleep
+import shutil
+import gc
+import turbodbc
+from turbodbc import connect
+import gc
+from pandas.api.types import is_string_dtype
+import numpy as np
+from sqlalchemy import create_engine
+import pyodbc
 import warnings
+import re
 
 import config
+from yandex_disk_func import *
+from parse_functions import *
 
 # забираем Яндекс токен
 yandex_token = config.yandex_token
@@ -63,7 +79,9 @@ base_cols = ['supplier', 'report_name', 'sheet_name', 'brand', 'period', 'source
 # 5. Каждая таблица должна заканчиваться строкой итогов 
 
 def get_beeline_mediaplan(data_link, network, report_name):
-    df = pd.read_excel(BytesIO(data_link), sheet_name='Plan_Media')
+    sheet_name='Plan_Media'
+    df = pd.read_excel(BytesIO(data_link), sheet_name=sheet_name)
+    sheet_name = normalize_headers(sheet_name)
     # заполняем вниз объединенные ячейки
     df['Unnamed: 1'] = df['Unnamed: 1'].ffill()
     df['Unnamed: 2'] = df['Unnamed: 2'].ffill()
@@ -157,7 +175,7 @@ def get_firstdata_mediaplan(data_link, network, report_name):
             df = pd.read_excel(BytesIO(data_link), sheet_name=sheet_name)
             # приводим в порядок название листа, чтобы его записать в новую таблицу
             sheet_name = normalize_headers(sheet_name)
-            print(sheet_name)
+            print(f'    {sheet_name}')
             # заполняем вниз название истоника
             df['Unnamed: 1'] = df['Unnamed: 1'].ffill()
             # заполняем вниз таргетинги
@@ -278,7 +296,7 @@ def get_hybrid_mediaplan(data_link, network, report_name):
        if 'медиаплан' in sheet_name.lower():
             df = pd.read_excel(BytesIO(data_link), sheet_name=sheet_name, header=None)
             sheet_name = normalize_headers(sheet_name)
-            print(sheet_name)
+            print(f'    {sheet_name}')
             # В столбике В находится строка итогов, по слову Итого мы определяем окончание таблицы с данными
             # но в некоторых случаях перед строкой итогов есть пустая строка
             # далее мы создадим проверку для поиска нужного нам окончания таблицы
@@ -370,7 +388,7 @@ def get_mobidriven_mediaplan(data_link, network, report_name):
         if 'мп' in sheet_name.lower():
             df = pd.read_excel(BytesIO(data_link), sheet_name=sheet_name, header=None)
             sheet_name = normalize_headers(sheet_name)
-            print(sheet_name)
+            print(f'    {sheet_name}')
             df[0] = df[0].fillna('0')
             df = df.fillna('')
             # сохраняем название бренда
@@ -448,7 +466,7 @@ def get_roxot_mediaplan(data_link, network, report_name):
         if 'bb' in sheet_name.lower():
             df = pd.read_excel(BytesIO(data_link), sheet_name=sheet_name, header=None)
             sheet_name = normalize_headers(sheet_name)
-            print(sheet_name)
+            print(f'    {sheet_name}')
             # заголовки в файле состоят из 2-х строк, поэтому нужно выполнить заполнение вниз на 1 строку
             # забираем название полей, в которых нужно сдвинуть строку вниз
             ffill_columns = [1, 2, 3, 4, 5, 6, 7]
@@ -503,6 +521,74 @@ def get_roxot_mediaplan(data_link, network, report_name):
 # In[ ]:
 
 
+# источник Segmento
+# типы размещения Видео и Баннерная реклама
+# Функция для обработки медиаплана 
+# 1. Медиаплан для обработки находится на листе Расчет 
+# 2. В данные в таблице начинаются со столбика В
+# 3. В столбике В находится название РК
+# 4. В столбике E находится название Рекламодатель, справа от него в этой же строке в столбике F название клиента
+
+
+def get_segmento_mediaplan(data_link, network, report_name):
+    sheet_name='Расчет'
+    df = pd.read_excel(BytesIO(data_link), sheet_name=sheet_name, header=None)
+    sheet_name = normalize_headers(sheet_name)
+    # заголовки в файле состоят из 2-х строк, поэтому нужно выполнить заполнение вниз на 1 строку
+    # забираем название полей, в которых нужно сдвинуть строку вниз
+    ffill_columns = [1, 2, 3, 4]
+    df[ffill_columns] = df[ffill_columns].ffill(limit=1) # заполняем вниз
+    df = df.fillna('')
+    # сохраняем название бренда
+    brand = df[5].loc[get_index_row(df, 4, 'рекламодатель')]
+    # т.к. мы выполнили заполнение вниз на 1 строку
+    # у нас дублируются заголовки, поэтому мы берем второе вхождение забираем индекс начала таблицы
+    start_index = get_index_row(df, 1, 'рк') + 1
+    # задаем названия полей
+    df.columns = df.iloc[start_index].apply(normalize_headers) # забираем название полей из файла
+    # обрезаем верхнюю часть таблицы. она больше не нужна
+    df = df.iloc[start_index+1:].reset_index(drop=True)
+    # создаем базовый список полей, которые есть всегда вне зависимости от типа размещения
+    standart_columns = ['рк', 'название технологии', 'продукт / формат размещения', 'период', 'соцдем', 'география', 'единица отгрузки (unit)', 
+                    'бюджет (net)',  'прогноз средней частоты', 'стоимость единицы отгрузки (net)', 'охват в уникальных пользователях',
+                      'показы', 'клики']
+    # проверяем наличие Видео размещений. Если они есть, то используем дополнительные поля из таблицы
+    # если Видео размещений нет, то добавляем дополнительно 2 поля с 0 (это нужно для нормализации общей таблицы     
+    if '% просмотров' not in list(df.columns):
+        df['просмотры'] = 0
+        df['% просмотров'] = 0.0
+        
+    standart_columns += ['просмотры', '% просмотров']
+    # оставляем только нужные поля
+    df = df[standart_columns]
+    # приводим названия полей к единому стандарту
+    df = df.rename(columns={'рк': 'placement','название технологии': 'site/ssp', 'продукт / формат размещения': 'ad copy format', 'период': 'period',
+        'соцдем': 'soc_dem', 'география': 'geo', 'единица отгрузки (unit)': 'rotation type', 'бюджет (net)': 'budget_without_nds',
+         '% просмотров': 'vtr, %', 'прогноз средней частоты': 'frequency', 'стоимость единицы отгрузки (net)': 'unit price',
+        'охват в уникальных пользователях': 'reach', 'показы': 'impressions', 'клики': 'clicks', 'просмотры': 'views'})
+
+    df['supplier'] = network
+    df['source'] = network
+    df['report_name'] = report_name
+    df['sheet_name'] = sheet_name
+    df['brand'] = brand
+    df['budget_nds'] =(df['budget_without_nds'] * 1.2).astype('float').round(2)
+    # вызываем функцию, чтобы убрать из этих полей знак - иди пусто заменить на 0
+    df['views'] = df['views'].apply(normalize_digits)
+    df['vtr, %'] = df['vtr, %'].apply(normalize_digits)
+    df['views'] = df['views'].astype('float').round(0)
+    df['targeting'] = ''
+    # создаем список текстоых полей, чтобы убрать из них лишние симовлы (перенос строки и тд)
+    text_columns = ['period', 'soc_dem']
+    df[text_columns] = df[text_columns].apply(normalize_text)
+    df = df[base_cols]
+
+    return df
+
+
+# In[ ]:
+
+
 # создаем функцию для обработки данных в эксель файле
 # в зависимости от источника парсинг будет отличаться
 # на входе функция принимает
@@ -526,10 +612,14 @@ def parse_yandex_responce(report_name, data_link, file_path, main_dict):
     if 'mobidriven' in report_name:
         network = 'mobidriven'
         main_dict[report_name] = get_mobidriven_mediaplan(data_link, network, report_name)
+        
     if 'roxot' in report_name:
-        network = 'mobidriven'
+        network = 'roxot'
         main_dict[report_name] = get_roxot_mediaplan(data_link, network, report_name)
         
+    if 'segmento' in report_name:
+        network = 'segmento'
+        main_dict[report_name] = get_segmento_mediaplan(data_link, network, report_name)
     # в самом конце удаляем файл по этому источнику
     delete_yandex_disk_file(file_path)
 
