@@ -14,6 +14,7 @@ import yadisk
 from datetime import datetime, date, timedelta
 from yandex_disk_func import *
 import re
+import warnings
 
 import config
 
@@ -25,6 +26,13 @@ main_folder = config.main_folder
 # забираем токен для подключения к гугл
 service_key = config.service
 gmail = config.gmail
+
+
+# In[ ]:
+
+
+warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
+pd.options.mode.chained_assignment = None
 
 
 # In[ ]:
@@ -105,10 +113,10 @@ def get_beeline_mediaplan(data_link, network, report_name):
     df['sheet_name'] = 'Plan_Media'
     df['brand'] = brand
     df['period'] = period
-    # вызываем функцию для парсинга текста из поля targeting
-    # значение каждого таргетинга записываем в отдельное поле датаФрейма
-    df['geo'] = df['targeting'].apply(lambda x: get_targetings(x, 'beeline')[0])
-    df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'beeline')[1])
+
+    # парсим Гео и Соц. дем из поля targeting
+    df['geo'] = df['targeting'].apply(lambda x: get_targetings(x, 'гео:','\n', flag='geo'))
+    df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'ца:','\n', flag='soc'))
     
     # убираем знак рубля, если он есть в стоимости
     currecny_columns = ['unit']
@@ -222,9 +230,6 @@ def get_firstdata_mediaplan(data_link, network, report_name):
             # Второая строка Универсальные баннеры - в ней нет значений потому что поставщик считает, что это одно и тоже
             # мы убираем такие строки без данных
             df = df[df['impressions']!='']
-            # end_index = list(df[df['unit price']==''].index)[0]
-            # # обрезаем таблицу снизу
-            # df = df.iloc[:end_index].reset_index(drop=True)
             # передаем новое название формата в нужное нам поле
             df['ad copy format'] = df['merge_type_cells']
             df = df.drop('merge_type_cells', axis=1)
@@ -237,10 +242,11 @@ def get_firstdata_mediaplan(data_link, network, report_name):
             df['site/ssp'] = ''
             df['placement'] = ''
             df['budget_nds'] =(df['budget_without_nds'] * 1.2).astype('float').round(2)
-            # вызываем функцию для парсинга текста из поля targeting
-            # значение каждого таргетинга записываем в отдельное поле датаФрейма
-            df['geo'] = df['targeting'].apply(lambda x: get_targetings(x, 'firstdata')[0])
-            df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'firstdata')[1])
+           
+            # парсим Гео и Соц. дем из поля targeting
+            df['geo'] = df['targeting'].apply(lambda x: get_targetings(x, 'гео:','\n', flag='geo'))
+            df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'ца:','покупатели', flag='soc'))
+            
             # если в этих полях встречаются пустые ячейки, то заменяем их на 0
             df['vtr, %'] = df['vtr, %'].apply(replace_blank)
             df['views'] = df['views'].apply(replace_blank)
@@ -335,9 +341,9 @@ def get_hybrid_mediaplan(data_link, network, report_name):
             df['brand'] = brand
             df['period'] = period
             df['budget_nds'] =(df['budget_without_nds'] * 1.2).astype('float').round(2)
-            # вызываем функцию для парсинга текста из поля targeting
-            # значение каждого таргетинга записываем в отдельное поле датаФрейма
-            df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'hybrid')[1])
+            # парсим Гео и Соц. дем из поля targeting
+            df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'ца:','\n', flag='soc'))
+           
             df['views'] = df['views'].apply(normalize_digits)
             df['vtr, %'] = df['vtr, %'].apply(normalize_digits)
             df = df[base_cols]
@@ -425,6 +431,78 @@ def get_mobidriven_mediaplan(data_link, network, report_name):
 # In[ ]:
 
 
+# источник Roxot
+# типы размещения Видео и Баннерная реклама
+# Функция для обработки медиаплана 
+# 1. Название листа, на котром находится Медиаплан должно содержать буквы BB 
+# 2. В данные в таблице начинаются со столбика В
+# 3. В столбике В находится название Клиент, справа от него в этой же строке в стобике С название клиента
+# 4. В столбике В находится поле с названием Целевая аудитория
+# 5. В столбике I  находится слово Частота и показатели частотности
+
+
+def get_roxot_mediaplan(data_link, network, report_name):
+    tmp_dict = {}
+    sheet_names = pd.ExcelFile(BytesIO(data_link))
+    for sheet_name in sheet_names.sheet_names:
+        if 'bb' in sheet_name.lower():
+            df = pd.read_excel(BytesIO(data_link), sheet_name=sheet_name, header=None)
+            sheet_name = normalize_headers(sheet_name)
+            print(sheet_name)
+            # заголовки в файле состоят из 2-х строк, поэтому нужно выполнить заполнение вниз на 1 строку
+            # забираем название полей, в которых нужно сдвинуть строку вниз
+            ffill_columns = [1, 2, 3, 4, 5, 6, 7]
+            df[ffill_columns] = df[ffill_columns].ffill(limit=1) # заполняем вниз
+            df[8] = df[8].fillna('0')
+            df = df.fillna('')
+            # сохраняем название бренда
+            brand = df[2].loc[get_index_row(df, 1, 'клиент')]
+            # т.к. мы выполнили заполнение вниз на 1 строку
+            # у нас дублируются заголовки, поэтому мы берем второе вхождение забираем индекс начала таблицы
+            start_index = get_index_row(df, 1, 'аудитория') + 1
+            # задаем названия полей
+            df.columns = df.iloc[start_index].apply(normalize_headers) # забираем название полей из файла
+            # обрезаем верхнюю часть таблицы. она больше не нужна
+            df = df.iloc[start_index+4:].reset_index(drop=True)
+            # обрезаем таблицу снизу
+            end_index = get_index_row(df, 'частота', '0')
+            df = df.iloc[:end_index]
+            # создаем базовый список полей, которые есть всегда вне зависимости от типа размещения
+            standart_columns = ['медиаканал', 'форматы объявлений', 'инвентарь', 'период', 'таргетинг', 'частота', 
+                            'охват, прогноз', 'показы', 'клики, прогноз', 'бюджет без ндс', 'avg. cpm']
+            # проверяем наличие Видео размещений. Если они есть, то используем дополнительные поля из таблицы
+            # если Видео размещений нет, то добавляем дополнительно 2 поля с 0 (это нужно для нормализации общей таблицы
+            if 'vtr, %' not in list(df.columns):
+                df['views'] = 0
+                df['vtr, %'] = 0.0
+            
+            standart_columns += ['views', 'vtr, %']
+            # оставляем только нужные поля
+            df = df[standart_columns]
+             # приводим названия полей к единому стандарту
+            df = df.rename(columns={'медиаканал': 'source', 'форматы объявлений': 'ad copy format', 'инвентарь': 'placement', 'период': 'period',
+                                    'таргетинг': 'targeting', 'частота': 'frequency', 'охват, прогноз': 'reach', 'показы': 'impressions',
+                                    'клики, прогноз': 'clicks', 'avg. cpm': 'unit price', 'бюджет без ндс': 'budget_without_nds'})
+            df['supplier'] = network
+            df['report_name'] = report_name
+            df['sheet_name'] = sheet_name
+            df['brand'] = brand
+            df['site/ssp'] = ''
+            df['rotation type'] = 'CPM'
+            df['budget_nds'] =(df['budget_without_nds'] * 1.2).astype('float').round(2)
+            # парсим Гео и Соц. дем из поля targeting
+            df['geo'] = df['targeting'].apply(lambda x: get_targetings(x, 'гео:','\n', flag='geo'))
+            df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'соц.дем:','\n', flag='soc'))
+            
+            df = df[base_cols]
+            tmp_dict[sheet_name] = df
+
+    return pd.concat(tmp_dict, ignore_index=True)
+
+
+# In[ ]:
+
+
 # создаем функцию для обработки данных в эксель файле
 # в зависимости от источника парсинг будет отличаться
 # на входе функция принимает
@@ -448,6 +526,10 @@ def parse_yandex_responce(report_name, data_link, file_path, main_dict):
     if 'mobidriven' in report_name:
         network = 'mobidriven'
         main_dict[report_name] = get_mobidriven_mediaplan(data_link, network, report_name)
+    if 'roxot' in report_name:
+        network = 'mobidriven'
+        main_dict[report_name] = get_roxot_mediaplan(data_link, network, report_name)
+        
     # в самом конце удаляем файл по этому источнику
     delete_yandex_disk_file(file_path)
 
@@ -569,27 +651,30 @@ def get_target_text(start_pattern, end_pattern, text):
 # In[ ]:
 
 
+
+
+
+# In[ ]:
+
+
 # создаем функцию для записи названий таргетингов в поля датаФрейма
-# на входе она принимает 2 параметра
+# на входе она принимает 4 параметра
 # column - поле с текстом, который нужно распарсить
-# source - название источника (какому поставщику принадлежит таблица - таким образом мы понимаем, какие правила парсинга применяются
+# start_pattern - ключевое слово начала текста, например 'гео:'
+# end_pattern - символ или ключевое слово окночания текста, например '\n' или 'покупатели'
+# flag - обозначение, какой таргетинг мы ищем geo или soc
 # для каждого таргетинга отдельно вызываем функцию, чтобы достать нужный текст
-# на выходе возвращаем список с текстом для каждого таргетинга
 # если таргеитнга не было в тексте, то вернутся пустые строки
-def get_targetings(column, source):
-    geo = ''
-    soc_dem = ''
+def get_targetings(column, start_pattern, end_pattern, flag):
+    result = ''
     text = column.lower().strip()
-    if 'гео:' in text or 'ца:' in text:
-        if source == 'firstdata':
-            geo = get_target_text('гео:', '\n', text)
-            soc_dem = get_target_text('ца:', 'покупатели', text)
-        if source == 'beeline':
-            geo = get_target_text('гео:', '\n', text)
-            soc_dem = get_target_text('ца:', '\n', text)
-        if source=='hybrid':
-            soc_dem = get_target_text('ца:', '\n', text)
-    return [geo, soc_dem]
+    if 'гео:' in text or 'ца:' in text or 'соц' in text:
+        if flag == 'geo':
+            result = get_target_text(start_pattern, end_pattern, text)
+        if flag == 'soc':
+            result = get_target_text(start_pattern, end_pattern, text)
+            
+    return result
 
 
 # In[ ]:
@@ -609,7 +694,7 @@ def replace_blank(column):
 
 # создаем функцию, чтобы получить индекс строки с первым встречанием заданного паттерна
 def get_index_row(df, col_name, flag):
-    return list(df[df[col_name].str.lower().str.contains(flag)].index)[0] 
+    return list(df[df[col_name].str.lower().str.contains(flag, na=False)].index)[0] 
 
 
 # In[ ]:
