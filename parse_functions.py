@@ -113,10 +113,10 @@ def get_beeline_mediaplan(data_link, network, report_name):
     df['sheet_name'] = 'Plan_Media'
     df['brand'] = brand
     df['period'] = period
-    # вызываем функцию для парсинга текста из поля targeting
-    # значение каждого таргетинга записываем в отдельное поле датаФрейма
-    df['geo'] = df['targeting'].apply(lambda x: get_targetings(x, 'beeline')[0])
-    df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'beeline')[1])
+
+    # парсим Гео и Соц. дем из поля targeting
+    df['geo'] = df['targeting'].apply(lambda x: get_targetings(x, 'гео:','\n', flag='geo'))
+    df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'ца:','\n', flag='soc'))
     
     # убираем знак рубля, если он есть в стоимости
     currecny_columns = ['unit']
@@ -230,9 +230,6 @@ def get_firstdata_mediaplan(data_link, network, report_name):
             # Второая строка Универсальные баннеры - в ней нет значений потому что поставщик считает, что это одно и тоже
             # мы убираем такие строки без данных
             df = df[df['impressions']!='']
-            # end_index = list(df[df['unit price']==''].index)[0]
-            # # обрезаем таблицу снизу
-            # df = df.iloc[:end_index].reset_index(drop=True)
             # передаем новое название формата в нужное нам поле
             df['ad copy format'] = df['merge_type_cells']
             df = df.drop('merge_type_cells', axis=1)
@@ -245,10 +242,11 @@ def get_firstdata_mediaplan(data_link, network, report_name):
             df['site/ssp'] = ''
             df['placement'] = ''
             df['budget_nds'] =(df['budget_without_nds'] * 1.2).astype('float').round(2)
-            # вызываем функцию для парсинга текста из поля targeting
-            # значение каждого таргетинга записываем в отдельное поле датаФрейма
-            df['geo'] = df['targeting'].apply(lambda x: get_targetings(x, 'firstdata')[0])
-            df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'firstdata')[1])
+           
+            # парсим Гео и Соц. дем из поля targeting
+            df['geo'] = df['targeting'].apply(lambda x: get_targetings(x, 'гео:','\n', flag='geo'))
+            df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'ца:','покупатели', flag='soc'))
+            
             # если в этих полях встречаются пустые ячейки, то заменяем их на 0
             df['vtr, %'] = df['vtr, %'].apply(replace_blank)
             df['views'] = df['views'].apply(replace_blank)
@@ -343,9 +341,9 @@ def get_hybrid_mediaplan(data_link, network, report_name):
             df['brand'] = brand
             df['period'] = period
             df['budget_nds'] =(df['budget_without_nds'] * 1.2).astype('float').round(2)
-            # вызываем функцию для парсинга текста из поля targeting
-            # значение каждого таргетинга записываем в отдельное поле датаФрейма
-            df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'hybrid')[1])
+            # парсим Гео и Соц. дем из поля targeting
+            df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'ца:','\n', flag='soc'))
+           
             df['views'] = df['views'].apply(normalize_digits)
             df['vtr, %'] = df['vtr, %'].apply(normalize_digits)
             df = df[base_cols]
@@ -436,9 +434,11 @@ def get_mobidriven_mediaplan(data_link, network, report_name):
 # источник Roxot
 # типы размещения Видео и Баннерная реклама
 # Функция для обработки медиаплана 
-# 1. Название листа, на котром находится Медиаплан должно содержать буквы МП 
-# 2. В столбике А  находится слово Бренд справа от него в столбике В название Бренда
-# 3. В столбике А  находится слово Период справа от него в столбике В название указан период медиаплана
+# 1. Название листа, на котром находится Медиаплан должно содержать буквы BB 
+# 2. В данные в таблице начинаются со столбика В
+# 3. В столбике В находится название Клиент, справа от него в этой же строке в стобике С название клиента
+# 4. В столбике В находится поле с названием Целевая аудитория
+# 5. В столбике I  находится слово Частота и показатели частотности
 
 
 def get_roxot_mediaplan(data_link, network, report_name):
@@ -490,10 +490,9 @@ def get_roxot_mediaplan(data_link, network, report_name):
             df['site/ssp'] = ''
             df['rotation type'] = 'CPM'
             df['budget_nds'] =(df['budget_without_nds'] * 1.2).astype('float').round(2)
+            # парсим Гео и Соц. дем из поля targeting
             df['geo'] = df['targeting'].apply(lambda x: get_targetings(x, 'гео:','\n', flag='geo'))
             df['soc_dem'] = df['targeting'].apply(lambda x: get_targetings(x, 'соц.дем:','\n', flag='soc'))
-            df['reach'] = df['reach'].astype('int')
-            df['clicks'] = df['clicks'].astype('int')
             
             df = df[base_cols]
             tmp_dict[sheet_name] = df
@@ -652,38 +651,19 @@ def get_target_text(start_pattern, end_pattern, text):
 # In[ ]:
 
 
-# # создаем функцию для записи названий таргетингов в поля датаФрейма
-# # на входе она принимает 2 параметра
-# # column - поле с текстом, который нужно распарсить
-# # source - название источника (какому поставщику принадлежит таблица - таким образом мы понимаем, какие правила парсинга применяются
-# # для каждого таргетинга отдельно вызываем функцию, чтобы достать нужный текст
-# # на выходе возвращаем список с текстом для каждого таргетинга
-# # если таргеитнга не было в тексте, то вернутся пустые строки
-# def get_targetings(column, source):
-#     geo = ''
-#     soc_dem = ''
-#     text = column.lower().strip()
-#     if 'гео:' in text or 'ца:' in text:
-#         if source == 'firstdata':
-#             geo = get_target_text('гео:', '\n', text)
-#             soc_dem = get_target_text('ца:', 'покупатели', text)
-#         if source == 'beeline':
-#             geo = get_target_text('гео:', '\n', text)
-#             soc_dem = get_target_text('ца:', '\n', text)
-#         if source=='hybrid':
-#             soc_dem = get_target_text('ца:', '\n', text)
-#     return [geo, soc_dem]
+
 
 
 # In[ ]:
 
 
 # создаем функцию для записи названий таргетингов в поля датаФрейма
-# на входе она принимает 2 параметра
+# на входе она принимает 4 параметра
 # column - поле с текстом, который нужно распарсить
-# source - название источника (какому поставщику принадлежит таблица - таким образом мы понимаем, какие правила парсинга применяются
+# start_pattern - ключевое слово начала текста, например 'гео:'
+# end_pattern - символ или ключевое слово окночания текста, например '\n' или 'покупатели'
+# flag - обозначение, какой таргетинг мы ищем geo или soc
 # для каждого таргетинга отдельно вызываем функцию, чтобы достать нужный текст
-# на выходе возвращаем список с текстом для каждого таргетинга
 # если таргеитнга не было в тексте, то вернутся пустые строки
 def get_targetings(column, start_pattern, end_pattern, flag):
     result = ''
