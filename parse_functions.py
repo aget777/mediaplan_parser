@@ -589,13 +589,142 @@ def get_segmento_mediaplan(data_link, network, report_name):
 # In[ ]:
 
 
+# источник Weborama
+# типы размещения Видео и Баннерная реклама
+# Функция для обработки медиаплана 
+# 1. Медиаплан для обработки находится на листе Расчет 
+# 2. В данные в таблице начинаются со столбика В
+# 3. В столбике В находится название РК
+# 4. В столбике E находится название Рекламодатель, справа от него в этой же строке в столбике F название клиента
+
+def get_weborama_mediaplan(data_link, network, report_name, extention):
+    tmp_dict = {}
+    sheet_names = pd.ExcelFile(BytesIO(data_link))
+    # в этом файле присутствуют скрытые листы
+    # нам нужно исключить их из парсинга
+    # поэтому добавляем дополнительный блок с проверкой статуса листа
+    sheets = get_sheets_list(sheet_names, extention)
+    for sheet in sheets:
+        sheet_name = check_excel_sheets(sheet, extention)
+        if sheet_name:
+            if 'banner' in sheet_name.lower() or 'video' in sheet_name.lower() \
+            or 'баннер' in sheet_name.lower() or 'видео' in sheet_name.lower():
+                df = pd.read_excel(BytesIO(data_link), sheet_name=sheet_name, header=None)
+                
+                sheet_name = normalize_headers(sheet_name)
+                print(f'    {sheet_name}')
+                
+                # заголовки в файле состоят из 2-х строк, поэтому нужно выполнить заполнение вниз на 1 строку
+                # забираем название полей, в которых нужно сдвинуть строку вниз
+                ffill_columns = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+                df[ffill_columns] = df[ffill_columns].ffill(limit=1) # заполняем вниз
+                
+                # т.к. мы выполнили заполнение вниз на 1 строку
+                # у нас дублируются заголовки, поэтому мы берем второе вхождение забираем индекс начала таблицы
+                start_index = get_index_row(df, 1, 'период') + 1
+                
+                # забираем название полей из файла
+                col_names_list = df.iloc[start_index].fillna('').apply(normalize_headers)
+                pattern = 'показы'
+                # получаем индекс колонки
+                col_index = get_col_index(col_names_list, pattern, flag='equals')
+                df[col_index] = df[col_index].fillna('0')
+                
+                df = df.fillna('')
+                
+                # сохраняем название бренда
+                brand = df[1].loc[get_index_row(df, 1, 'клиент')]
+                brand = brand[len('Клиент:'):].strip()
+                # если целевая аудитория НЕ будет указана в самой таблице
+                # то возьмем значение из описания НАД таблицей
+                ca = df[1].loc[get_index_row(df, 1, 'ца')]
+                ca = ca[len('ЦА:'):].strip()
+                
+                # т.к. одно из полей может менять название, нам нужно его к единому стандарту
+                # сначала получим индекс колонки, которая нам нужна. она тоже может менять положение (может быть втоорой или третьей)
+                pattern = 'сервис'
+                # получаем индекс колонки
+                col_index = get_col_index(col_names_list, pattern)
+                # меняем название в нужнй ячейке
+                df[col_index].loc[start_index] = 'source'
+                # меняем назвние еще одного поля
+                pattern = 'объем'
+                 # получаем индекс колонки
+                col_index = get_col_index(col_names_list, pattern)
+                # меняем название в нужнй ячейке
+                df[col_index].loc[start_index] = 'budget_without_nds'
+                # меняем назвние еще одного поля
+                pattern = 'частота'
+                 # получаем индекс колонки
+                col_index = get_col_index(col_names_list, pattern)
+                # меняем название в нужнй ячейке
+                df[col_index].loc[start_index] = 'frequency'
+                
+                # задаем названия полей
+                df.columns = df.iloc[start_index].apply(normalize_headers) # забираем название полей из файла
+                # обрезаем верхнюю часть таблицы. она больше не нужна
+                df = df.iloc[start_index+1:].reset_index(drop=True)
+                # обрезаем таблицу снизу
+                end_index = get_index_row(df, 'показы', '0')
+                df = df.iloc[:end_index]
+                
+                # создаем базовый список полей, которые есть всегда вне зависимости от типа размещения
+                standart_columns = ['период', 'source', 'формат рекламы', 'гео', 'аудиторные данные перечислены через слэш (/)',
+                        'стоимость за единицу (до ндс)', 'budget_without_nds', 'показы', 'охват', 'клики', 'frequency', 'модель закупки']
+
+                # проверяем наличие Видео размещений. Если они есть, то используем дополнительные поля из таблицы
+                # если Видео размещений нет, то добавляем дополнительно 2 поля с 0 (это нужно для нормализации общей таблицы     
+                if 'vtr' not in list(df.columns):
+                    df['views'] = 0
+                    df['vtr'] = 0.0
+                else:
+                    df['views'] = df['vtr'].astype('float') * df['показы'].astype('float')
+
+                if 'ца' not in list(df.columns):
+                    df['ца'] = ca
+    
+                standart_columns += ['ца', 'views', 'vtr']
+                # оставляем только нужные поля
+                df = df[standart_columns]
+                # приводим названия полей к единому стандарту
+                df = df.rename(columns={'период': 'period', 'формат рекламы': 'ad copy format', 'гео': 'geo',
+                                'аудиторные данные перечислены через слэш (/)': 'targeting', 'ца': 'soc_dem', 
+                                'модель закупки': 'rotation type', 'стоимость за единицу (до ндс)': 'unit price',
+                                'показы': 'impressions', 'охват': 'reach', 'клики': 'clicks', 'vtr': 'vtr, %'})
+
+                df['supplier'] = network
+                df['report_name'] = report_name
+                df['sheet_name'] = sheet_name
+                df['brand'] = brand
+                df['site/ssp'] = ''
+                df['placement'] = ''
+                df['budget_nds'] =(df['budget_without_nds'] * 1.2).astype('float').round(2)
+                
+                df = df[base_cols]
+                tmp_dict[sheet_name] = df
+
+    return pd.concat(tmp_dict, ignore_index=True)
+        
+
+
+# In[ ]:
+
+
 # создаем функцию для обработки данных в эксель файле
 # в зависимости от источника парсинг будет отличаться
 # на входе функция принимает
 # -название отчета - по сути это название источника
 # - ссылку для скачивания эксель файла
 # - путь к файлу, чтобы его удалить после закачивания
-def parse_yandex_responce(report_name, data_link, file_path, main_dict):
+def parse_yandex_responce(file_name, data_link, file_path, main_dict):
+    
+    # убираем расширение .xlsx из названия файла
+    report_name = '.'.join(file_name.split('.')[:-1]) 
+    report_name = report_name.lower().strip().replace('\n', ' ')
+    print(report_name)
+    
+    # сохраняем расширение файла в отдельную переменную
+    extention = file_name.split('.')[-1]
     
     if 'beeline' in report_name:
         network = 'beeline'
@@ -620,6 +749,12 @@ def parse_yandex_responce(report_name, data_link, file_path, main_dict):
     if 'segmento' in report_name:
         network = 'segmento'
         main_dict[report_name] = get_segmento_mediaplan(data_link, network, report_name)
+
+    if 'weborama' in report_name:
+        network = 'weborama'
+        main_dict[report_name] = get_weborama_mediaplan(data_link, network, report_name, extention)
+
+    
     # в самом конце удаляем файл по этому источнику
     delete_yandex_disk_file(file_path)
 
@@ -657,15 +792,15 @@ def get_data_from_ya_folder(yandex_folders, main_dict, flag='prog'):
                         if 'xls' in file_name: # еслит тип файла является xlsx, то уберем расширение и будем его использовать в качесвте названия отчета
                             file_path = file_info['path']
                             
-                            report_name = '.'.join(file_name.split('.')[:-1]) # убираем .xlsx из названия файла
-                            report_name = report_name.lower().strip().replace('\n', ' ')
-                            print(report_name)
+                            # report_name = '.'.join(file_name.split('.')[:-1]) # убираем .xlsx из названия файла
+                            # report_name = report_name.lower().strip().replace('\n', ' ')
+                            # print(report_name)
                             
                             res_file_link = get_yandex_disk_responce(download_url, public_key, file_path) # получаем ссылку на скачивание отчета
                             download_response = requests.get(res_file_link['href'])
 
                             # return download_response, report_name
-                            parse_yandex_responce(report_name, download_response.content, file_path, main_dict)
+                            parse_yandex_responce(file_name, download_response.content, file_path, main_dict)
                                                   
 
 
@@ -782,6 +917,26 @@ def replace_blank(column):
 # In[ ]:
 
 
+# создаем функцию, чтобы найти индекс столбца
+# на входе передаем след. аргументы 
+# - названий полей
+# - часть названия поля, которое будем искать
+# - flag - условие назание поля содержит или должно быть равно нашему паттерну, по умолчанию 'contains'
+def get_col_index(cols_list, pattern, flag='contains'):
+    for num, name in enumerate(cols_list):
+        if flag=='contains':
+            if pattern in name:
+                return num
+                break
+        else:
+            if pattern==name:
+                return num
+                break
+
+
+# In[ ]:
+
+
 # создаем функцию, чтобы получить индекс строки с первым встречанием заданного паттерна
 def get_index_row(df, col_name, flag):
     return list(df[df[col_name].str.lower().str.contains(flag, na=False)].index)[0] 
@@ -797,4 +952,36 @@ def get_timing(row):
     if len(timing) > 0:
         result += f' timing: {timing}'
     return result
+
+
+# In[ ]:
+
+
+# функция возвращает список листов
+# на входе принимает 2 параметра
+# - sheet_names (экель файл) - pd.ExcelFile(BytesIO(data_link))
+# - extention - расширение файла 'xls' / 'xlsx'
+def get_sheets_list(sheet_names, extention):
+    if extention=='xls':
+        sheets = sheet_names.book.sheets()       
+    else:
+        sheets = sheet_names.book.worksheets
+        
+    return sheets
+
+
+# In[ ]:
+
+
+# функция проверяет, если лист является открытым, то возвращаем его название
+# на вход принимает 2 параметра
+# - sheet - это объект, который мы получаем при переборе через цикл названий листов
+# - extention - расширение файла 'xls' / 'xlsx'
+def check_excel_sheets(sheet, extention):
+    if extention=='xls':
+        if sheet.visibility==0:
+            return sheet.name
+    else:
+        if sheet.sheet_state=='visible':
+            return sheet.title
 
