@@ -80,22 +80,23 @@ base_cols = ['supplier', 'report_name', 'sheet_name', 'brand', 'period', 'source
 
 def get_beeline_mediaplan(data_link, network, report_name):
     sheet_name='Plan_Media'
-    df = pd.read_excel(BytesIO(data_link), sheet_name=sheet_name)
+    df = pd.read_excel(BytesIO(data_link), sheet_name=sheet_name, header=None)
+    
     sheet_name = normalize_headers(sheet_name)
-    # заполняем вниз объединенные ячейки
-    df['Unnamed: 1'] = df['Unnamed: 1'].ffill()
-    df['Unnamed: 2'] = df['Unnamed: 2'].ffill()
-    df['Unnamed: 3'] = df['Unnamed: 3'].ffill()
-    df['Unnamed: 4'] = df['Unnamed: 4'].ffill()
-    df = df.fillna('')
-
-    # сохраняем название бренда
-    brand = df['Unnamed: 2'].loc[get_index_row(df, 'Unnamed: 1', 'brand')] 
-    # сохраняем период
-    period = df['Unnamed: 2'].loc[get_index_row(df, 'Unnamed: 1', 'period')]
+    
     # забираем индекс начала таблицы
-    start_index = get_index_row(df, 'Unnamed: 1', 'source')
-
+    start_index = get_index_row(df, 1, 'source')
+    # забираем название полей из файла
+    col_names_list = df.iloc[start_index].fillna('').apply(normalize_headers)
+    
+    ffill_columns = [1, 2, 3, 4]
+    df[ffill_columns] = df[ffill_columns].ffill(limit=1) # заполняем вниз
+    df = df.fillna('')
+    
+    # сохраняем название бренда
+    brand = df[2].loc[get_index_row(df, 1, 'brand')] 
+    # сохраняем период
+    period = df[2].loc[get_index_row(df, 1, 'period')]
     
     # задаем названия полей
     df.columns = df.iloc[start_index].apply(normalize_headers) # забираем название полей из файла
