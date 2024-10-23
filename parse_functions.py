@@ -173,26 +173,27 @@ def get_firstdata_mediaplan(data_link, network, report_name):
     sheet_names = pd.ExcelFile(BytesIO(data_link))
     for sheet_name in sheet_names.sheet_names:
         if 'mediaplan' in sheet_name:
-            df = pd.read_excel(BytesIO(data_link), sheet_name=sheet_name)
+            df = pd.read_excel(BytesIO(data_link), sheet_name=sheet_name, header=None)
+        
             # приводим в порядок название листа, чтобы его записать в новую таблицу
             sheet_name = normalize_headers(sheet_name)
             print(f'    {sheet_name}')
-            # заполняем вниз название истоника
-            df['Unnamed: 1'] = df['Unnamed: 1'].ffill()
-            # заполняем вниз таргетинги
-            df['Unnamed: 2'] = df['Unnamed: 2'].ffill()
+            
+            # заполняем вниз название истоника и аудитории
+            ffill_columns = [1, 2]
+            df[ffill_columns] = df[ffill_columns].ffill() # заполняем вниз
             # заполяем вниз rotation type - здесь объединенная ячейка, и в этом поле нет названия
             # чтобы оно появилось, заранее протягиваем вниз это название
-            df['Unnamed: 8'] = df['Unnamed: 8'].fillna('rotation type')
+            df[8] = df[8].fillna('rotation type')
             # заполняем вниз объединенные ячейки
             df = df.fillna('')
             
             # сохраняем название бренда
-            brand = df['Unnamed: 3'].loc[get_index_row(df, 'Unnamed: 2', 'brand')] 
+            brand = df[3].loc[get_index_row(df, 2, 'brand')] 
             # сохраняем период
-            period = df['Unnamed: 3'].loc[get_index_row(df, 'Unnamed: 2', 'период')]
+            period = df[3].loc[get_index_row(df, 2, 'период')]
             # забираем индекс начала таблицы
-            start_index = get_index_row(df, 'Unnamed: 1', 'category')
+            start_index = get_index_row(df, 1, 'category')
             
             # задаем названия полей
             df.columns = df.iloc[start_index].apply(normalize_headers) # забираем название полей из файла
@@ -593,10 +594,12 @@ def get_segmento_mediaplan(data_link, network, report_name):
 # источник Weborama
 # типы размещения Видео и Баннерная реклама
 # Функция для обработки медиаплана 
-# 1. Медиаплан для обработки находится на листе Расчет 
+# 1. В названии листа, на котором находится маедиплан обязательно должно быть одно из слов 'banner' / 'video' / 'баннер' / 'видео'  
 # 2. В данные в таблице начинаются со столбика В
-# 3. В столбике В находится название РК
-# 4. В столбике E находится название Рекламодатель, справа от него в этой же строке в столбике F название клиента
+# 3. В столбике В должно находиться слово Период
+# 4. В столбике В должно находится описание медиаплана
+# - название клиента должно начинаться Клиент:
+# - название целевой аудитории должно начинаться с ЦА:
 
 def get_weborama_mediaplan(data_link, network, report_name, extention):
     tmp_dict = {}
