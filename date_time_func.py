@@ -1,13 +1,23 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[37]:
 
 
 import pandas as pd
 from datetime import date
 from datetime import datetime
 import calendar
+import locale
+
+
+# In[38]:
+
+
+locale.setlocale(
+    category=locale.LC_ALL,
+    locale="Russian"  # Note: do not use "de_DE" as it doesn't work
+)
 
 
 # In[ ]:
@@ -16,13 +26,7 @@ import calendar
 
 
 
-# In[ ]:
-
-
-
-
-
-# In[3]:
+# In[2]:
 
 
 def create_date_table(start, end):
@@ -44,7 +48,7 @@ def create_date_table(start, end):
 
 
 
-# In[4]:
+# In[3]:
 
 
 # создаем функцию, чтобы раздать флаг для начала и конца недели
@@ -66,7 +70,7 @@ def get_start_end_week(num_day_week, start_day=0):
     return [start_flag, end_flag]
 
 
-# In[5]:
+# In[4]:
 
 
 # создаем функцию, чтобы определить к какому месяцу относится неделя
@@ -99,7 +103,24 @@ def get_custom_month(row):
     return custom_mon
 
 
-# In[39]:
+# In[57]:
+
+
+# функция возвращает название месяца на русском языке для первой недели кастомного месяца
+# принимает на вход строку
+# если это первая неделя кастомного месяца, то возвращаем название на русском
+# иначе пусто
+def get_month_name(row):
+    result = ''
+    if row['week_month_num']==0:
+        year = int(row['year'])
+        mon_num = int(row['custom_mon_num'])
+        result = datetime(year, mon_num, 1).strftime('%B')
+
+    return result
+
+
+# In[ ]:
 
 
 # функция для создания календаря с разбивкой по неделям
@@ -147,14 +168,27 @@ def get_mediaplan_calendar(cur_year='', start_day_num=0):
     df = df[['date', 'year', 'start_custom_week', 'end_custom_week']]
     # определяем номер месяца, к которому можно отнести эту неделю
     df['custom_mon_num'] = df.apply(get_custom_month, axis=1)
+    # группируем по кастомному номеру месяца и внутри просталяем номера строк для каждой недели
+    df['week_month_num'] = df.groupby(['custom_mon_num'])['date'].transform('cumcount') 
+    # присваиваем название месяца для первой недели в кастомном месяце
+    df['month_name'] = df.apply(get_month_name, axis=1)
+
     # переворачиваем дату, чтобы сначала шел день.месяц.год
     df['start_custom_week'] = df['start_custom_week'].apply(lambda x: x.date().strftime('%d.%m.%Y'))
     df['end_custom_week'] = df['end_custom_week'].apply(lambda x: x.date().strftime('%d.%m.%Y'))
     # # создаем поле с началом и окончанием недели в одной строке
     df['week_period'] = df['start_custom_week'].astype('str').apply(lambda x: str(x)[:5]) + \
     ' - ' + df['end_custom_week'].astype('str').apply(lambda x: str(x)[:5])
+    
+    # для того, чтобы поле с датой можно было преобразовать в JSON и записать в гугл докс необходимо привести дату к строке
+    # сначала приводим формат даты к русскому написанию
+    # приводим датуВремя к дате
+    # меняем на строковый формат
+    df['date'] = df['date'].apply(lambda x: x.strftime('%d.%m.%Y'))
+    # df['date'] = df['date'].dt.date
+    df['date'] = df['date'].astype('str')
     # оставляем нужные поля
-    df = df[['week_period', 'custom_mon_num']]
+    df = df[['date', 'week_period',  'month_name']]
     # транспонируем датаФрейм
     df = df.transpose()
 
@@ -162,6 +196,12 @@ def get_mediaplan_calendar(cur_year='', start_day_num=0):
 
 
 # In[ ]:
+
+
+
+
+
+# In[7]:
 
 
 
