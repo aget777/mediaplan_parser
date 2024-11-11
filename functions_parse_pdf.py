@@ -87,20 +87,18 @@ def parse_pdf_benchmarks(data_link):
             pass
         # если в заголовке страницы содержится инфо о отм, что на странице присутствует инфо о бенчмарках, то продолжаем парсинг
         if 'бенчмарки' in report_name and ('vk' in report_name or 'mytarget' in report_name or 'вконтакте' in report_name):
-            df_tmp = pd.DataFrame()
             if 'vk' in report_name:
                 print(report_name)
-                source = 'vk_ads'
+                source = 'VK Ads'
                 df_tmp = get_parse_vk_benchmarks(text, report_name, period, source)
-            #     # main_dict[report_name] = df_tmp
-            if 'mytarget' in report_name or 'вконтакте':
+                main_dict[report_name] = df_tmp
+            elif 'mytarget' in report_name or 'вконтакте':
                 print(report_name)
                 if 'mytarget' in report_name:
-                    source = 'mytarget'
+                    source = 'MyTarget'
                 else:
-                    source = 'vkontakte'
+                    source = 'Vkontakte'
                 df_tmp = get_parse_mytarget_benchmarks(text, report_name, period, source)
-            if not df_tmp.empty:
                 main_dict[report_name] = df_tmp
 
     return pd.concat(main_dict, ignore_index=True)
@@ -184,10 +182,10 @@ def get_parse_vk_benchmarks(text, report_name, period, source):
 
         except:
             pass
-        df_tmp = pd.DataFrame(row_list, columns=['cpc без ндс', 'cpm без ндс', 'ctr %', 'категория', 'период', 'объект рекламы', 'цель рекламы'])
-        df_tmp['source'] = source
-        df_tmp['format_type'] = ''
-        # print(df_tmp)
+    df_tmp = pd.DataFrame(row_list, columns=['cpc без ндс', 'cpm без ндс', 'ctr %', 'категория', 'период', 'объект рекламы', 'цель рекламы'])
+    df_tmp['source'] = source
+    df_tmp['format_type'] = ''
+    # print(df_tmp)
     return df_tmp
 
 
