@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[2]:
 
 
 import pandas as pd
@@ -33,6 +33,7 @@ import re
 import config
 from yandex_disk_func import *
 from parse_functions import *
+from functions_parse_pdf import *
 
 # забираем Яндекс токен
 yandex_token = config.yandex_token
@@ -758,7 +759,9 @@ def parse_yandex_responce(file_name, data_link, file_path, main_dict):
         network = 'weborama'
         main_dict[report_name] = get_weborama_mediaplan(data_link, network, report_name, extention)
 
-    
+    if 'бенчмарк' in report_name:
+        main_dict[report_name] = parse_pdf_benchmarks(data_link) 
+
     # в самом конце удаляем файл по этому источнику
     delete_yandex_disk_file(file_path)
 
@@ -772,9 +775,12 @@ def parse_yandex_responce(file_name, data_link, file_path, main_dict):
 # yandex_folders - вложенные папки (например - файлы Алексея(источник Яндекс) / файлы Стаса(источник Программатик) / файлы Полины(прочие источники)
 # yandex_token - токен Яндекс (получаем заранее самостоятельно)
 # flag - это ключевое слово, которое содержится в названии папки, чтобы можно было понять к кому она отностится
+# - prog / split (prog - программатик Стас, split - рассплитовка бюдджета Полина)
+# extention - расширение
+# xls - для медиапланов Стас, pdf - бенчмарки Полина
 # именно эту папку мы и будем прасить
 # так же принимаем на входе 2 словаря - Баннеры и Видео (в них сохраним все данные)
-def get_data_from_ya_folder(yandex_folders, main_dict, flag='prog'):
+def get_data_from_ya_folder(yandex_folders, main_dict, flag='prog', extention='xls'):
     public_key = yandex_folders['public_key']  # из ответа Яндекс забираем public_key, чтобы использовать его для скачивания файлов
 
     for i in range(len(yandex_folders['_embedded']['items'])): # через цикл проходим по ответу Яндекса и забираем названия вложенных папок
@@ -793,7 +799,7 @@ def get_data_from_ya_folder(yandex_folders, main_dict, flag='prog'):
                     file_info = yandex_responce['_embedded']['items'][i]
                     if file_info['type']=='file':  # если документ является фалйом(не папкой или изображением), то забираем его название 
                         file_name = file_info['name'] # сохраняем название файла
-                        if 'xls' in file_name: # еслит тип файла является xlsx, то уберем расширение и будем его использовать в качесвте названия отчета
+                        if extention in file_name: # еслит тип файла является xlsx, то уберем расширение и будем его использовать в качесвте названия отчета
                             file_path = file_info['path']
                             
                             # report_name = '.'.join(file_name.split('.')[:-1]) # убираем .xlsx из названия файла
