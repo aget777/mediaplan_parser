@@ -45,12 +45,6 @@ def create_date_table(start, end):
 # In[ ]:
 
 
-
-
-
-# In[3]:
-
-
 # создаем функцию, чтобы раздать флаг для начала и конца недели
 # на вход она принимает 
 #  - поле из датаФрейма с номером дня недели (понедельник =0, воскресенье=6)
@@ -68,6 +62,58 @@ def get_start_end_week(num_day_week, start_day=0):
     if num_day_week==end_of_week:
         end_flag = 1
     return [start_flag, end_flag]
+
+
+# In[3]:
+
+
+# # создаем функцию, чтобы раздать флаг для начала и конца недели
+# # на вход она принимает 
+# #  - поле из датаФрейма с номером дня недели (понедельник =0, воскресенье=6)
+# # - номер дня недели, с которого мы хотим, чтобы начиналась наша неделя
+# # на выходе функция возвращает список - флаг дня начала недели и флаг дня оконяания недели
+# def get_start_end_week(row, start_day=0):
+    
+#     end_of_week = 6 # по умолчанию конец недели - воскресенье
+#     start_flag = ''
+#     end_flag = ''
+#     # если неделя начинается НЕ с понедельника, считаем номер дня недели, который будет считаться окончанием
+#     if start_day != 0:
+#         end_of_week = start_day-1
+
+#     # если это Первая неделя в году, нам нужно правильно определить начало и окончание для неоплных недель
+#     if row['week_num']==1:
+#         # создаем первое число в году
+#         start_of_year = str(row['year']) + '-01-01'
+#         # приводим дату к нужному формату
+#         date = row['date'].strftime('%Y-%m-%d')
+#         # если неделя начинается НЕ с понедельника
+#         if start_day != 0:
+#             # если дата равна началу года и номер дня недели меньше номера начала недели
+#             # присваиваем первому дню в году значение начала недели
+#             if date == start_of_year and row['num_day_week'] <= start_day:
+#                 start_flag = 0
+#             else:
+#                 # иначе - если номер первого деня в году равен началу недели, ставим ему соответсвующий флаг
+#                 if row['num_day_week']==start_day:
+#                     start_flag = 0
+                    
+#         # если неделя начинается с понедельника
+#         else:
+#             # если дата равна началу года, то ставим флаг начала недели
+#             if date == start_of_year:
+#                 start_flag = 0
+#         # если номер дня недели равен номерю дня окончания недели, ставим соответсвующий флаг
+#         if row['num_day_week']==end_of_week:
+#             end_flag = 1
+#         return [start_flag, end_flag]
+    
+    
+#     if row['num_day_week']==start_day:
+#         start_flag = 0
+#     if row['num_day_week']==end_of_week:
+#         end_flag = 1
+#     return [start_flag, end_flag]
 
 
 # In[4]:
@@ -140,6 +186,8 @@ def get_mediaplan_calendar(cur_year='', start_day_num=0):
     # создаем базовый календарь
     df = create_date_table(start, end)
     # вызываем функцию, чтобы раздать флаги начала и окночания недели
+    # df['custom_start_week'] = df.apply(lambda x: get_start_end_week(x, start_day_num)[0], axis=1)
+    # df['custom_end_week'] = df.apply(lambda x: get_start_end_week(x, start_day_num)[1], axis=1)
     df['custom_start_week'] = df['num_day_week'].apply(lambda x: get_start_end_week(x, start_day_num)[0])
     df['custom_end_week'] = df['num_day_week'].apply(lambda x: get_start_end_week(x, start_day_num)[1])
     
@@ -155,8 +203,11 @@ def get_mediaplan_calendar(cur_year='', start_day_num=0):
     # т.к. начало и окончание недели идут парами по 2 строки
     # первая строка - начало недели / вторая окончание
     # для второй строки мы присваиваем номер недели, который нахдится в предыдущей строке
-    df['new_week_num'] = df['week_num'].shift(1)
-    df = df.fillna(1)
+    if start_day_num==0:
+        df['new_week_num'] = df['week_num']
+    else:
+        df['new_week_num'] = df['week_num'].shift(1)
+        df['new_week_num'] = df['new_week_num'].fillna(df['week_num'].min())
 
     # переносим начало и окончание недели в отдельные поля
     df['start_custom_week'] = df.groupby('new_week_num')['date'].transform('min')
